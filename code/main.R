@@ -6,7 +6,7 @@
 #' @description
 #'
 
-source("code/aux/functions.R")
+source("code/aux/helper_functions.R")
 
 multi_h2 <- function(twin_data, phenotype_list, bootstrap_iter){
     
