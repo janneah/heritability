@@ -1,0 +1,57 @@
+simulate_twin_phenotypes <- function(n_pairs = 3000, prop_os = 1/3, h2_vec, K_vec, seed = 42) {
+  stopifnot(length(h2_vec) == length(K_vec))
+  set.seed(seed)
+
+  library(MASS)
+  library(dplyr)
+  library(tidyr)
+  library(purrr)
+
+  n_os <- round(n_pairs * prop_os)
+  n_ss <- n_pairs - n_os
+  total_pairs <- n_os + n_ss
+
+  # Twin metadata --------------------------------------------------
+  sex_config <- c(rep("SS", n_ss), rep("OS", n_os))
+  sex_pair <- map(sex_config, function(cfg) {
+    if (cfg == "OS") sample(c(0, 1)) else sample(c(0, 0), size = 2)
+  })
+  sex_vec <- do.call(rbind, lapply(sex_pair, function(x) matrix(x, nrow = 2)))
+
+  meta <- tibble(
+    pair_id = rep(1:total_pairs, each = 2),
+    twin_id = 1:(2 * total_pairs),
+    sex_config = rep(sex_config, each = 2),
+    sex = as.vector(sex_vec)
+  )
+
+  # Simulate each phenotype ----------------------------------------
+  phenotypes <- map2_dfc(h2_vec, K_vec, function(h2, K) {
+    # Variance structure
+    Vg <- h2
+    Ve <- 1 - h2
+
+    # Covariance matrices
+    sigma_ss <- matrix(c(1, Vg, Vg, 1), nrow = 2) # Treat SS as highly correlated
+    sigma_os <- matrix(c(1, 0.5 * Vg, 0.5 * Vg, 1), nrow = 2)
+
+    # Simulate liability
+    liab_ss <- mvrnorm(n_ss, mu = c(0, 0), Sigma = sigma_ss)
+    liab_os <- mvrnorm(n_os, mu = c(0, 0), Sigma = sigma_os)
+    liab <- rbind(liab_ss, liab_os)
+
+    # Threshold
+    T <- qnorm(1 - K)
+    y1 <- as.integer(liab[, 1] > T)
+    y2 <- as.integer(liab[, 2] > T)
+
+    return(tibble(pheno = c(y1, y2)))
+  })
+
+  # Rename phenotype columns
+  pheno_names <- paste0("pheno_", seq_along(h2_vec), "_I") # matches your naming convention
+  names(phenotypes) <- pheno_names
+
+  df <- bind_cols(meta, phenotypes)
+  return(df)
+}
