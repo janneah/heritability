@@ -40,7 +40,7 @@ multi_h2_se <- function(data, phenotypes, iterations, cores) {
       phenotype <- phenotypes[i]
       
       
-      name <- substr(phenotype, 1, nchar(phenotype)-2)          # Removing "_I" from phenotype name
+      name <- stringr::str_remove(phenotype, "_I$")             # Removing "_I" from phenotype name
       parameter_df <- parameters(data = data,                   # Creating dataframe with parameters used in h2 estimation (K, Evary, T, z, I)        
                                  phenotype_col = phenotype)     # This function will also be called inside estim_h2, so this is just for saving
       
