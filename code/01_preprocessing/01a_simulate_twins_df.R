@@ -1,57 +1,118 @@
-simulate_twin_phenotypes <- function(n_pairs = 3000, prop_os = 1/3, h2_vec, K_vec, seed = 42) {
-  stopifnot(length(h2_vec) == length(K_vec))
+#' Simulate Twin Metadata and Diagnoses
+#'
+#' @description
+#' This script simulates metadata for n twin pairs (with realistic sex configuration),
+#' and assigns diagnoses (ICD-8 or ICD-10) to a proportion of individuals
+#' based on a specified population prevalence (K).
+#'
+#' @output
+#' - `simulated_twin_df.rds`: Metadata for all simulated twins
+#' - `simulated_dx.rds`: Diagnosis table for individuals with specified diagnosis
+#' 
+# -------------------------------------------------------------------
+# Libraries
+# -------------------------------------------------------------------
+
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(MASS)
+library(tibble)
+
+# -------------------------------------------------------------------
+# Parameters
+# -------------------------------------------------------------------
+
+n_pairs <- 45000
+K <- 0.01                # Population prevalence
+seed <- 42
+
+# ICD-10 and ICD-8 codes to be sampled (epilepsy in this case)
+icd10 <- c("G40", "G40.0", "G40.1", "G40.3", "G40.9")
+icd8  <- c("345", "345.0", "345.1", "345.9")
+
+# -------------------------------------------------------------------
+# Functions
+# -------------------------------------------------------------------
+
+simulate_twin_phenotypes <- function(n_pairs = 3000, prop_os = 1/3, seed = 42) {
   set.seed(seed)
-
-  library(MASS)
-  library(dplyr)
-  library(tidyr)
-  library(purrr)
-
+  
   n_os <- round(n_pairs * prop_os)
   n_ss <- n_pairs - n_os
   total_pairs <- n_os + n_ss
-
-  # Twin metadata --------------------------------------------------
+  
+  # Sex configuration
   sex_config <- c(rep("SS", n_ss), rep("OS", n_os))
+  
+  # Assign sex per pair
   sex_pair <- map(sex_config, function(cfg) {
-    if (cfg == "OS") sample(c(0, 1)) else sample(c(0, 0), size = 2)
+    if (cfg == "OS") sample(c(0, 1))  # one male, one female
+    else {
+      sex <- sample(c(0, 1), 1, prob = c(0.49, 0.51))  # ~51% male
+      c(sex, sex)
+    }
   })
   sex_vec <- do.call(rbind, lapply(sex_pair, function(x) matrix(x, nrow = 2)))
-
-  meta <- tibble(
-    pair_id = rep(1:total_pairs, each = 2),
-    twin_id = 1:(2 * total_pairs),
+  
+  # Assign same age per pair
+  age_vec <- sample(18:40, total_pairs, replace = TRUE)
+  
+  # Static follow-up date
+  follow_up_date <- as.Date("2023-12-31")
+  
+  # Metadata frame
+  meta_data <- tibble(
+    sib_id = rep(1:total_pairs, each = 2),
+    id = 1:(2 * total_pairs),
     sex_config = rep(sex_config, each = 2),
-    sex = as.vector(sex_vec)
+    sex = as.vector(sex_vec),
+    age = rep(age_vec, each = 2),
+    follow_up_end = follow_up_date
   )
-
-  # Simulate each phenotype ----------------------------------------
-  phenotypes <- map2_dfc(h2_vec, K_vec, function(h2, K) {
-    # Variance structure
-    Vg <- h2
-    Ve <- 1 - h2
-
-    # Covariance matrices
-    sigma_ss <- matrix(c(1, Vg, Vg, 1), nrow = 2) # Treat SS as highly correlated
-    sigma_os <- matrix(c(1, 0.5 * Vg, 0.5 * Vg, 1), nrow = 2)
-
-    # Simulate liability
-    liab_ss <- mvrnorm(n_ss, mu = c(0, 0), Sigma = sigma_ss)
-    liab_os <- mvrnorm(n_os, mu = c(0, 0), Sigma = sigma_os)
-    liab <- rbind(liab_ss, liab_os)
-
-    # Threshold
-    T <- qnorm(1 - K)
-    y1 <- as.integer(liab[, 1] > T)
-    y2 <- as.integer(liab[, 2] > T)
-
-    return(tibble(pheno = c(y1, y2)))
-  })
-
-  # Rename phenotype columns
-  pheno_names <- paste0("pheno_", seq_along(h2_vec), "_I") # matches your naming convention
-  names(phenotypes) <- pheno_names
-
-  df <- bind_cols(meta, phenotypes)
-  return(df)
+  
+  return(meta_data)
 }
+
+simulate_dx <- function(meta_df, icd10_codes, icd8_codes, K = 0.01, min_dx = 1, max_dx = 3, seed = 123) {
+  set.seed(seed)
+  
+  n_cases <- round(nrow(meta_df) * K)
+  case_ids <- sample(meta_df$id, size = n_cases, replace = FALSE)
+  
+  # Assign 1–3 diagnosis entries per case
+  dx_counts <- sample(min_dx:max_dx, size = n_cases, replace = TRUE)
+  dx_ids <- rep(case_ids, times = dx_counts)
+  
+  # Random ICD version per entry
+  icd_sources <- sample(c("ICD10", "ICD8"), size = length(dx_ids), replace = TRUE)
+  icd_codes <- purrr::map_chr(icd_sources, function(source) {
+    if (source == "ICD10") sample(icd10_codes, 1) else sample(icd8_codes, 1)
+  })
+  
+  # Diagnosis dates
+  followup_start <- as.Date("1995-01-01")
+  followup_end <- as.Date("2023-12-31")
+  dx_dates <- sample(seq(followup_start, followup_end, by = "day"), size = length(dx_ids), replace = TRUE)
+  
+  dx_df <- tibble(
+    id = dx_ids,
+    icd_source = icd_sources,
+    icd_code = icd_codes,
+    dx_date = dx_dates
+  ) %>%
+    arrange(id, dx_date)
+  
+  return(dx_df)
+}
+
+# -------------------------------------------------------------------
+# Run simulation and save
+# -------------------------------------------------------------------
+
+twin_df <- simulate_twin_phenotypes(n_pairs = n_pairs, seed = seed)
+dx_df <- simulate_dx(twin_df, icd10, icd8, K = K)
+
+# Save to disk
+saveRDS(twin_df, file = "data/simulated_twin_df.rds")
+saveRDS(dx_df, file = "data/simulated_dx.rds")

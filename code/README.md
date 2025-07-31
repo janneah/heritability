@@ -15,7 +15,7 @@ General-purpose utility functions used across scripts.
 
 Scripts for data preparation and harmonisation.
 
-- `01a_simulate_twins_df.R` — Simulates a twin dataset for heritability estimation.
+- `01a_simulate_twins_df.R` — Simulates a twin dataset for heritability estimation. Parameters currently set to generate a population of 45,000 pairs with a phenotype with population prevalence 0.01.
 - `01b_map_phecodes.R` — Maps ICD codes to phecodes.
 
 ### 📁 `02_analysis/`
