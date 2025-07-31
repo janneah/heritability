@@ -28,7 +28,7 @@ Scripts for running the linear mixed model with 500 bootstrap iterations.
 
 ## 📌 Notes
 
-- `01_preprocessing/` does not include the full preprocessing pipeline applied to the data extracted from the Danish national registries. Only components relevant for simulation or reproducible subsets (e.g. phecode mapping) are provided.
+- `01_preprocessing/` does not include the full preprocessing pipeline applied to the data from the Danish national registries. Only components relevant for illustrating phecode mapping are provided.
 - Scripts are numbered to reflect the recommended execution order.
 - Shared functions are modularised under `00_helpers`.
 - Data files referenced by these scripts are located in the `data/` or `steps/` folder.
