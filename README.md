@@ -4,7 +4,7 @@ Project for estimating heritability of all diagnoses with sufficient prevalence 
 
 The project is divided into three parts:
 
-1. **Creation of twin** (simulated)
+1. **Simulation of twin data**
 2. **Definition of phenotypes** through conversion of ICD-8 and ICD-10 to phecodes
 3. **Heritability estimation** using the method from [Lakhani et al. (2019)](https://www.nature.com/articles/s41588-018-0313-7)
 
