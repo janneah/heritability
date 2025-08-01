@@ -1,70 +1,100 @@
-simulate_twins_with_metadata <- function(n_pairs = 3000, prop_os = 1/3, h2_vec, K_vec, seed = 42) {
-  stopifnot(length(h2_vec) == length(K_vec))
-  set.seed(seed)
+#' @title Heritability Estimation Pipeline (Simulated Data)
+#' @description Runs bootstrapped heritability estimation on multiple binary phenotypes.
 
-  library(MASS)
-  library(dplyr)
-  library(tidyr)
-  library(purrr)
-  library(lubridate)
+# ------------------------------------------------------------------
+# Setup ------------------------------------------------------------
+# ------------------------------------------------------------------
 
-  n_os <- round(n_pairs * prop_os)
-  n_ss <- n_pairs - n_os
-  total_pairs <- n_os + n_ss
+# Required packages (scoped usage preferred in parallel)
+library(here)
 
-  # Set sex configurations (SS or OS)
-  sex_config_vec <- c(rep("SS", n_ss), rep("OS", n_os))
+# Load data --------------------------------------------------------
+simdata <- readRDS(here::here("steps", "twins_dx_status_400min.rds"))
 
-  # Assign sex per pair
-  sex_list <- map(sex_config_vec, function(cfg) {
-    if (cfg == "OS") sample(c(0, 1))          # one male, one female
-    else {
-      sex <- sample(c(0, 1), 1, prob = c(0.51, 0.49))               # choose either male or female, 51% chance of male (as in approximately in paper)
-      c(sex, sex)
+# Progress bar handler
+progressr::handlers(global = TRUE)
+
+# ------------------------------------------------------------------
+# Main heritability function ---------------------------------------
+# ------------------------------------------------------------------
+
+multi_h2_se <- function(data, phenotypes, iterations, cores) {
+  library(foreach)
+  
+  # Set up parallel backend
+  doFuture::registerDoFuture()
+  future::plan("multisession", workers = cores)
+  
+  # Set up progress bar
+  progressr::handlers(global = TRUE)
+  progressr::handlers(progressr::handler_progress(
+    format = ":percent [:bar] :elapsed | eta: :eta",
+    width = 60,
+    complete = "="
+  ))
+  
+  source(here::here("code", "00_helpers", "h2_helpers.R"))
+  # Estimate p (probability of MZ given SS)
+  prob <- prob_mz(data)
+  
+  # Loop over phenotypes
+  results <- data.frame()
+  
+  progressr::with_progress({
+    p <- progressr::progressor(along = phenotypes)
+    
+    results <- foreach(i = seq_along(phenotypes), .packages = c("boot", "stringr")) %dopar% {
+      
+      source(here::here("code", "00_helpers", "h2_helpers.R"))
+      phenotype <- phenotypes[i]
+      
+      name <- stringr::str_remove(phenotype, "_I$")
+      parameter_df <- parameters(data = data, phenotype_col = phenotype)
+      
+      corrs <- estim_h2_ros_rss(data, prob, phenotype)
+      
+      bootstrap <- boot::boot(
+        data = data,
+        statistic = estim_h2,
+        R = iterations,
+        parallel = "snow",
+        phenotype = phenotype,
+        p = prob
+      )
+      
+      boot_ci <- boot::boot.ci(
+        boot.out = bootstrap,
+        conf = 0.95,
+        type = "norm"
+      )
+      
+      p(sprintf("Phenotype %s", name))
+      row <- cbind(
+        name,
+        parameter_df$cases,
+        parameter_df$controls,
+        bootstrap$t0,
+        sd(bootstrap$t),
+        boot_ci$normal[2],
+        boot_ci$normal[3],
+        corrs$r_ss_liab,
+        corrs$r_os_liab
+      )
     }
   })
-  sex_vec <- do.call(rbind, sex_list)
-
-  # Age range
-  age_vec <- sample(18:40, total_pairs, replace = TRUE)
-
-  # Dates for follow_up_end - arbitrarily set to 2023-12-31
-  follow_up_end <- as.Date("2023-12-31")
-
-  # Build pairwise metadata
-  meta_df <- tibble(
-    sib_id = rep(1:total_pairs, each = 2),
-    id = 1:(2 * total_pairs),
-    sex_config = rep(sex_config_vec, each = 2),
-    sex = as.vector(sex_vec),
-    age = rep(age_vec, each = 2),
-    follow_up_end = rep(follow_up_dates, each = 2)
-  )
-
-  # Simulate each phenotype using liability model
-  phenotypes <- map2_dfc(h2_vec, K_vec, function(h2, K) {
-    Vg <- h2
-    Ve <- 1 - h2
-
-    sigma_ss <- matrix(c(1, Vg, Vg, 1), nrow = 2)
-    sigma_os <- matrix(c(1, 0.5 * Vg, 0.5 * Vg, 1), nrow = 2)
-
-    liab_ss <- mvrnorm(n_ss, mu = c(0, 0), Sigma = sigma_ss)
-    liab_os <- mvrnorm(n_os, mu = c(0, 0), Sigma = sigma_os)
-    liab <- rbind(liab_ss, liab_os)
-
-    threshold <- qnorm(1 - K)
-    y1 <- as.integer(liab[, 1] > threshold)
-    y2 <- as.integer(liab[, 2] > threshold)
-
-    tibble(pheno = c(y1, y2))
-  })
-
-  colnames(phenotypes) <- paste0("pheno_", seq_along(h2_vec), "_I")
-
-  # Combine metadata and phenotypes
-  df <- bind_cols(meta_df, phenotypes) %>%
-    relocate(id, age, sex, sex_config, follow_up_end, sib_id)
-
+  
+  df <- as.data.frame(do.call(rbind, results))
+  colnames(df) <- c("phenotype", "cases", "controls", "h2_liab", "h2_se", "ci_95_lower", "ci_95_upper", "r_ss_liab", "r_os_liab")
+  
   return(df)
 }
+
+# ------------------------------------------------------------------
+# Run estimation ---------------------------------------------------
+# ------------------------------------------------------------------
+
+phenotype_cols <- setdiff(colnames(simdata), c("id", "age", "sex", "sex_config", "follow_up_end", "sib_id", "extra_ss_id"))
+iterations <- 5
+res <- multi_h2_se(simdata, phenotype_cols, iterations, 4)
+
+saveRDS(res, here::here("results", paste0("h2_estimates_", iterations, "_iter.rds")))
