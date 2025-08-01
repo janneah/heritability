@@ -6,17 +6,17 @@
 # Load data --------------------------------------------------------
 # ------------------------------------------------------------------
 
-lpr  <- readRDS(here::here("data", "simulated_twin_lpr.rds"))
-stam <- readRDS(here::here("data", "stam_data.rds"))
+stam  <- readRDS(here::here("data", "simulated_twin_df.rds"))
+lpr <- readRDS(here::here("data", "simulated_dx.rds"))
 
 # ------------------------------------------------------------------
 # Load helpers and mappings ----------------------------------------
 # ------------------------------------------------------------------
 
-source(here::here("code", "helper_functions", "from_icd_to_phecodes.R"))
+source(here::here("code", "00_helpers", "mapping_helpers.R"))
 
 # ICD8 → ICD10 mapping
-icd8_map <- data.table::fread(here::here("data", "maps", "mapICD8ToICD10.txt"), sep = "\t") |>
+icd8_map <- data.table::fread(here::here("data", "maps", "map_icd8_2_icd10.txt"), sep = "\t") |>
   dplyr::mutate(
     START_DATE  = as.Date(as.character(START_DATE), format = "%Y%m%d"),
     END_DATE    = as.Date(as.character(END_DATE), format = "%Y%m%d"),
@@ -28,28 +28,16 @@ icd8_map <- data.table::fread(here::here("data", "maps", "mapICD8ToICD10.txt"), 
 # Phecode map and phenotype info
 load(here::here("data", "maps", "pheinfo.rda"))
 load(here::here("data", "maps", "sex_restriction.RData"))
-phecode_map <- readRDS(here::here("data", "maps", "phecode_icd10.rds"))
-
-# ------------------------------------------------------------------
-# Long format diagnosis list ---------------------------------------
-# ------------------------------------------------------------------
-
-icd_col <- "icd"
-
-long_lpr <- pivot_longer_lpr(
-  lpr,
-  new_col = icd_col,
-  cols = c("c_diag", "c_adiag", "c_tildiag")
-)
+phecode_map <- fread(here::here("data", "maps", "phecode_icd10.csv"))
 
 # ------------------------------------------------------------------
 # ICD8 → ICD10 -----------------------------------------------------
 # ------------------------------------------------------------------
-
+icd_col <- "icd"
 icd10_col <- "icd10"
 
 lpr_icd10 <- translate_icd8(
-  lpr      = long_lpr,
+  lpr      = lpr,
   col      = icd_col,
   new_col  = icd10_col,
   map      = icd8_map
@@ -106,13 +94,15 @@ sex_restriction <- dplyr::left_join(
 ) |>
   dplyr::filter(male_only == TRUE | female_only == TRUE)
 
-# Define phenotypes with ≥ 400 cases
+# Define phenotypes with ≥ 400 cases (only any category which the epilepsy icds might fall into in this case)
 pheno_400 <- lpr_parental_phecodes |>
   dplyr::group_by(Phenotype, phecode) |>
   dplyr::summarise(n = dplyr::n(), .groups = "drop") |>
   dplyr::arrange(dplyr::desc(n)) |>
   dplyr::filter(!Phenotype %in% sex_restriction$description) |>
   dplyr::filter(n >= 400)
+
+head(pheno_400)
 
 # ------------------------------------------------------------------
 # Case-control and filtering ---------------------------------------
@@ -130,4 +120,4 @@ dx_status_flt <- remove_imbalanced_pheno(dx_status)
 # Save results -----------------------------------------------------
 # ------------------------------------------------------------------
 
-saveRDS(dx_status_flt, here::here("steps", "dx_status_min400.rds"))
+saveRDS(dx_status_flt, here::here("steps", "twins_dx_status_400min.rds"))
