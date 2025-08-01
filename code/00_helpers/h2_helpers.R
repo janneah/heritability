@@ -8,7 +8,7 @@
 #' 
 
 widen_df <- function(data, phenotype) {
-  cols_to_keep <- c("id", "birth_date", "age", "sex", "sex_config", "follow_up_end", "sib_id", "extra_ss_id", phenotype) # Limit number of columns, when there are many phenotypes
+  cols_to_keep <- c("id", "age", "sex", "sex_config", "follow_up_end", "sib_id", "extra_ss_id", phenotype) # Limit number of columns, when there are many phenotypes
   data <- data[, cols_to_keep]
   
   odd_idx <- seq(1, nrow(data), by = 2)
@@ -33,7 +33,7 @@ widen_df <- function(data, phenotype) {
 #'
 
 random_effects <- function(wide_df) {
-  df_id <- dplyr::mutate(wide_df, twin_id = 1:nrow(wide_df), twin_id_2 = twin_id)
+  df_id <- dplyr::mutate(wide_df, sib_id = 1:nrow(wide_df), sib_id_2 = sib_id)
   
   df_ss <- df_id %>%
     dplyr::filter(sex_config == "SS") %>%
@@ -49,14 +49,14 @@ random_effects <- function(wide_df) {
                   extra_ss_id_2 = 1:nrow(.) + 16000000)  
   
   new_wide_df <- dplyr::bind_rows(df_ss, df_os) %>%
-    dplyr::arrange(twin_id)
+    dplyr::arrange(sib_id)
   
   df_t1 <- dplyr::select(new_wide_df, !dplyr::ends_with("_2"))
   df_t2 <- dplyr::select(new_wide_df, dplyr::ends_with("_2"))
   colnames(df_t2) <- colnames(df_t1)
   
   longer_df <- dplyr::bind_rows(df_t1, df_t2) %>%
-    dplyr::arrange(twin_id)
+    dplyr::arrange(sib_id)
   
   return(longer_df)
 }
@@ -116,11 +116,11 @@ prob_mz <- function(data) {
 compute_h2_components <- function(data, phenotype, p) {
   param_df <- parameters(data, phenotype_col = phenotype)
   
-  data$twin_id <- as.factor(data$twin_id)
+  data$sib_id <- as.factor(data$sib_id)
   data$sex <- as.factor(data$sex)
   y <- data[[phenotype]]
   
-  fit <- lme4::lmer(y ~ age + sex + (1 | twin_id) + (1 | extra_ss_id), data = data)
+  fit <- lme4::lmer(y ~ age + sex + (1 | sib_id) + (1 | extra_ss_id), data = data)
   tidy_fit <- broom.mixed::tidy(fit)
   
   K <- param_df$K
@@ -135,7 +135,7 @@ compute_h2_components <- function(data, phenotype, p) {
     dplyr::select(phenotype, term, estimate) %>%
     tidyr::pivot_wider(names_from = term, values_from = estimate) %>%
     dplyr::mutate(
-      var_pair = `twin_id.sd__(Intercept)`^2,
+      var_pair = `sib_id.sd__(Intercept)`^2,
       varextra_ss = `extra_ss_id.sd__(Intercept)`^2,
       var_res = `Residual.sd__Observation`^2,
       var_tot = var_pair + varextra_ss + var_res,
