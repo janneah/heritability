@@ -28,14 +28,14 @@ K <- 0.01                # Population prevalence
 seed <- 42
 
 # ICD-10 and ICD-8 codes to be sampled (epilepsy in this case)
-icd10 <- c("G40", "G40.0", "G40.1", "G40.3", "G40.9")
-icd8  <- c("345", "345.0", "345.1", "345.9")
+icd10 <- c("G40", "G400", "G401", "G403", "G409")
+icd8  <- c("34511", "34530", "34519")
 
 # -------------------------------------------------------------------
 # Functions
 # -------------------------------------------------------------------
 
-simulate_twin_phenotypes <- function(n_pairs = 3000, prop_os = 1/3, seed = 42) {
+simulate_twins <- function(n_pairs = 3000, prop_os = 1/3, seed = 42) {
   set.seed(seed)
   
   n_os <- round(n_pairs * prop_os)
@@ -71,8 +71,28 @@ simulate_twin_phenotypes <- function(n_pairs = 3000, prop_os = 1/3, seed = 42) {
     follow_up_end = follow_up_date
   )
   
-  return(meta_data)
+  # Split SS and OS pairs
+  meta_ss <- meta_data %>% filter(sex_config == "SS")
+  meta_os <- meta_data %>% filter(sex_config == "OS")
+  
+  # Assign extra_ss_id to SS (sequential per pair: 1,1 → 2,2 → ...)
+  meta_ss <- meta_ss %>%
+    mutate(pair_index = rep(1:(n() / 2), each = 2),
+           extra_ss_id = pair_index)
+  
+  # Assign extra_ss_id to OS (e.g. 800001,1600001 → 800002,1600002 → ...)
+  meta_os <- meta_os %>%
+    mutate(pair_index = rep(1:(n() / 2), each = 2),
+           extra_ss_id = rep(c(800000, 1600000), times = n() / 2) + pair_index)
+  
+  # Combine and arrange
+  meta_out <- bind_rows(meta_ss, meta_os) %>%
+    arrange(id) %>%
+    select(-pair_index)
+  
+  return(meta_out)
 }
+
 
 simulate_dx <- function(meta_df, icd10_codes, icd8_codes, K = 0.01, min_dx = 1, max_dx = 3, seed = 123) {
   set.seed(seed)
@@ -90,15 +110,15 @@ simulate_dx <- function(meta_df, icd10_codes, icd8_codes, K = 0.01, min_dx = 1, 
     if (source == "ICD10") sample(icd10_codes, 1) else sample(icd8_codes, 1)
   })
   
-  # Diagnosis dates
-  followup_start <- as.Date("1995-01-01")
-  followup_end <- as.Date("2023-12-31")
+  # Diagnosis dates (icd8 codes)
+  followup_start <- as.Date("1971-01-01")
+  followup_end <- as.Date("1995-12-31")
   dx_dates <- sample(seq(followup_start, followup_end, by = "day"), size = length(dx_ids), replace = TRUE)
   
   dx_df <- tibble(
     id = dx_ids,
     icd_source = icd_sources,
-    icd_code = icd_codes,
+    icd = icd_codes,
     dx_date = dx_dates
   ) %>%
     arrange(id, dx_date)
@@ -110,9 +130,10 @@ simulate_dx <- function(meta_df, icd10_codes, icd8_codes, K = 0.01, min_dx = 1, 
 # Run simulation and save
 # -------------------------------------------------------------------
 
-twin_df <- simulate_twin_phenotypes(n_pairs = n_pairs, seed = seed)
+twin_df <- simulate_twins(n_pairs = n_pairs, seed = seed)
 dx_df <- simulate_dx(twin_df, icd10, icd8, K = K)
 
 # Save to disk
 saveRDS(twin_df, file = "data/simulated_twin_df.rds")
 saveRDS(dx_df, file = "data/simulated_dx.rds")
+
