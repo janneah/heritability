@@ -7,6 +7,7 @@
 
 # Required packages (scoped usage preferred in parallel)
 library(here)
+options(doFuture.rng.onMisuse = "ignore")
 
 # Load data --------------------------------------------------------
 simdata <- readRDS(here::here("steps", "twins_dx_status_400min.rds"))
@@ -94,7 +95,9 @@ multi_h2_se <- function(data, phenotypes, iterations, cores) {
 # ------------------------------------------------------------------
 
 phenotype_cols <- setdiff(colnames(simdata), c("id", "age", "sex", "sex_config", "follow_up_end", "sib_id", "extra_ss_id"))
-iterations <- 5
+iterations <- 500
 res <- multi_h2_se(simdata, phenotype_cols, iterations, 4)
+
+res <- dirty_polish(res)
 
 saveRDS(res, here::here("results", paste0("h2_estimates_", iterations, "_iter.rds")))
