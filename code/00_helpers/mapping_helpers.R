@@ -213,32 +213,3 @@ remove_imbalanced_pheno <- function(data) {
   return(data_filtered)
 }
 
-
-#' Round, format and polish h2 estimation results
-#'
-#' @param data Data frame of heritability results
-#'
-#' @return Cleaned, rounded result table
-
-dirty_polish <- function(data) {
-  pretty_res <- data %>%
-    dplyr::mutate(
-      cases = round(as.numeric(cases), digits = -1),
-      controls = round(as.numeric(controls), digits = -1),
-      h2_liab = round(as.numeric(h2_liab), 3),
-      ci_95_lower = round(as.numeric(ci_95_lower), 3),
-      ci_95_upper = round(as.numeric(ci_95_upper), 3),
-      h2_se = round(as.numeric(h2_se), 3),
-      r_ss_liab = round(as.numeric(r_ss_liab), 3),
-      r_os_liab = round(as.numeric(r_os_liab), 3),
-      pval = 2 * (1 - stats::pnorm(abs(h2_liab / h2_se)))
-    ) %>%
-    dplyr::arrange(dplyr::desc(cases)) %>%
-    dplyr::select(!c(cases, controls))
-
-  if ("K" %in% names(pretty_res)) {
-    pretty_res <- dplyr::select(pretty_res, -K)
-  }
-
-  return(pretty_res)
-}
