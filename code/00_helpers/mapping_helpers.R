@@ -17,7 +17,7 @@ translate_icd8 <- function(lpr, col, new_col, map) {
     dplyr::mutate(
       !!col := ifelse(stringr::str_starts(!!as.name(col), "^Y|^E"), NA, !!as.name(col)),
       !!new_col := ifelse(is.na(ICD10_CODE), !!as.name(col),
-                          ifelse(!is.na(ICD10_CODE) & d_inddto > START_DATE & d_inddto < END_DATE, ICD10_CODE, Inf))
+                          ifelse(!is.na(ICD10_CODE) & dx_date > START_DATE & dx_date < END_DATE, ICD10_CODE, Inf))
     ) %>%
     dplyr::filter(!grepl("Inf", !!rlang::sym(new_col)), !is.na(!!as.name(col))) %>%
     dplyr::select(-c(ICD10_CODE, START_DATE, END_DATE, MAPPING_SCORE, MAPPING_FLAG, ICD8_TEXT))
@@ -41,7 +41,7 @@ format_icd10 <- function(lpr, col) {
       !!as.name(col) := stringr::str_remove(!!as.name(col), "^D(?=[a-zA-Z])"),
       !!as.name(col) := stringr::str_replace_all(!!as.name(col), "(\\d+)[a-zA-Z]+", "\\1")
     ) %>%
-    dplyr::distinct(pnr, !!as.name(col), .keep_all = TRUE)
+    dplyr::distinct(id, !!as.name(col), .keep_all = TRUE)
 
   return(lpr)
 }
@@ -61,7 +61,7 @@ naive_mapping <- function(lpr, icd10_col, phecode_col, map) {
     dplyr::left_join(map, by = setNames(nm = icd10_col, object = "ICD10")) %>%
     dplyr::select(-c(`ICD10 String`, Phenotype, `Excl. Phecodes`, `Excl. Phenotypes`)) %>%
     dplyr::rename(!!as.name(phecode_col) := PheCode) %>%
-    dplyr::distinct(pnr, !!as.name(icd10_col), !!as.name(phecode_col), .keep_all = TRUE)
+    dplyr::distinct(id, !!as.name(icd10_col), !!as.name(phecode_col), .keep_all = TRUE)
 
   return(lpr)
 }
@@ -94,7 +94,7 @@ broader_mapping <- function(lpr, icd10_col, phecode_col, map) {
     dplyr::left_join(map[, c("ICD10", "PheCode")], by = setNames(nm = icd10_col, object = "ICD10")) %>%
     dplyr::mutate(!!as.name(phecode_col) := PheCode) %>%
     dplyr::select(!PheCode) %>%
-    dplyr::distinct(pnr, !!as.name(icd10_col), !!as.name(phecode_col), .keep_all = TRUE)
+    dplyr::distinct(id, !!as.name(icd10_col), !!as.name(phecode_col), .keep_all = TRUE)
 
   return(broader_mapping_lpr)
 }
@@ -131,8 +131,8 @@ parental_phecodes <- function(lpr, phecode_col, new_col, map) {
     dplyr::filter(!is.na(!!as.name(new_col))) %>%
     dplyr::select(!decimal_code) %>%
     dplyr::rename(phecode = !!as.name(new_col)) %>%
-    dplyr::left_join(map[, c("PheCode", "Phenotype")], by = c("phecode" = "PheCode")) %>%
-    dplyr::distinct(pnr, phecode, .keep_all = TRUE) %>%
+    dplyr::left_join(map[, c("PheCode", "Phenotype")], by = c("phecode" = "PheCode"), relationship = "many-to-many") %>%
+    dplyr::distinct(id, phecode, .keep_all = TRUE) %>%
     dplyr::filter(!is.na(Phenotype))
 
   return(lpr)
@@ -141,29 +141,39 @@ parental_phecodes <- function(lpr, phecode_col, new_col, map) {
 
 #' Generate binary case/control matrix for phenotypes
 #'
-#' @param stam Base cohort data with pnr identifiers
-#' @param lpr Long-format df with mapped phenotypes per pnr
+#' @param stam Base cohort data with id identifiers
+#' @param lpr Long-format df with mapped phenotypes per id
 #' @param phenotypes Data frame with phenotype names and phecodes
 #'
 #' @return Wide-format case/control matrix merged with `stam`
 
-case_control_status <- function(stam, lpr, phenotypes) {
-  stam <- data.table::as.data.table(stam)
-  lpr <- data.table::as.data.table(lpr)
-  pheno_list <- phenotypes$Phenotype
+case_control_status <- function(stam, lpr, phenotypes){
+    status_df <- stam %>%
+      left_join(lpr[, c("id", "phecode")], by = "id") %>%
+      distinct(id, phecode, .keep_all = TRUE)
 
-  lpr_filtered <- unique(lpr[Phenotype %in% pheno_list, .(pnr, Phenotype)])
-  lpr_filtered[, status := 1]
+    pheno_list <- phenotypes$Phenotype
 
-  wide <- data.table::dcast(lpr_filtered, pnr ~ Phenotype, value.var = "status", fill = 0)
-  data.table::setnames(wide, old = pheno_list, new = paste0(pheno_list, "_I"))
+    for(pheno in pheno_list){
+      pheno_col <- paste0(pheno, "_I")
 
-  out <- dplyr::left_join(stam, wide, by = "pnr")
+      current_code <- phenotypes[phenotypes$Phenotype == pheno, "phecode"]$phecode # Extracting the current phecode
 
-  for (col in pheno_list) data.table::set(out, which(is.na(out[[col]])), col, 0)
+      status_df <- status_df %>%
+        mutate(!!as.name(pheno_col) := ifelse(phecode == current_code, 1, 0),
+               !!as.name(pheno_col) := ifelse(is.na(!!as.name(pheno_col)), 0, !!as.name(pheno_col)))
 
-  return(out)
-}
+    }
+    status_df <- status_df %>%
+      group_by(id) %>%
+      summarise(across(ends_with("_I"), max))
+
+    output <- stam %>%
+      left_join(status_df, by = "id")
+
+    return(output)
+  }
+
 
 
 #' Compute the sex ratio (larger/smaller) for a binary phenotype
