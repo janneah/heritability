@@ -1,5 +1,7 @@
 # Heritability of Disorders in the Danish Health Registers
 
+[![DOI](https://zenodo.org/badge/744933980.svg)](https://doi.org/10.5281/zenodo.18480232)
+
 Project for estimating heritability of all diagnoses with sufficient prevalence in the Danish health registers using twins and siblings.
 
 The project is divided into three parts:
